@@ -1,0 +1,372 @@
+% !TEX program = xelatex
+\documentclass[serif, aspectratio=169]{beamer}
+
+\usepackage{fontspec}
+\newfontfamily\myfont{Times New Roman}
+
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{multicol}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xcolor}
+
+\usepackage{HKUSTstyle}
+
+\author{Vũ Công Tuấn Dương -- B22DCKH024}
+\title{Phân tích chuỗi thời gian:\\So sánh mô hình ARIMA và VAR}
+\institute{Khoa CNTT1 -- PTIT}
+\date{\small \today}
+
+\definecolor{hkustblue}{RGB}{0, 56, 116}
+\definecolor{hkustred}{RGB}{209, 51, 59}
+\definecolor{codegreen}{RGB}{0, 128, 0}
+\definecolor{darkblue}{RGB}{0, 0, 139}
+
+\lstset{
+    basicstyle=\ttfamily\scriptsize,
+    keywordstyle=\bfseries\color{darkblue},
+    commentstyle=\color{codegreen},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    frame=single,
+    breaklines=true,
+    language=Python,
+    showstringspaces=false,
+}
+
+% Custom commands
+\newcommand{\highlight}[1]{\textbf{\color{hkustblue}#1}}
+\newcommand{\red}[1]{\textbf{\color{hkustred}#1}}
+\newcommand{\green}[1]{\textbf{\color{codegreen}#1}}
+
+\begin{document}
+
+% --- Title Slide ---
+\begin{frame}
+    \titlepage
+\end{frame}
+
+% --- Table of Contents ---
+\begin{frame}{Mục lục}
+    \tableofcontents
+\end{frame}
+
+% ============================================================
+\section{Giới thiệu}
+% ============================================================
+
+\begin{frame}{Giới thiệu}
+    \begin{block}{Mục tiêu}
+        So sánh hai mô hình dự báo chuỗi thời gian:
+    \end{block}
+    
+    \vspace{0.3cm}
+    \begin{columns}
+        \column{0.5\textwidth}
+        \begin{block}{ARIMA}
+            Mô hình \highlight{đơn biến} (Univariate)
+        \end{block}
+        
+        \column{0.5\textwidth}
+        \begin{block}{VAR}
+            Mô hình \highlight{đa biến} (Multivariate)
+        \end{block}
+    \end{columns}
+    
+    \vspace{0.5cm}
+    \textbf{Bộ dữ liệu}: UCI Air Quality
+    \begin{itemize}
+        \item Nồng độ chất ô nhiễm theo giờ từ cảm biến tại Ý
+        \item Thời gian: \highlight{Tháng 3/2004 -- Tháng 4/2005}
+    \end{itemize}
+\end{frame}
+
+% ============================================================
+\section{Tải và chuẩn bị dữ liệu}
+% ============================================================
+
+\begin{frame}{Import thư viện}
+    \begin{lstlisting}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.vector_ar.var_model import VAR
+from statsmodels.tsa.stattools import adfuller
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+import warnings
+warnings.filterwarnings('ignore')
+    \end{lstlisting}
+\end{frame}
+
+\begin{frame}{Tải và xử lý dữ liệu}
+    \begin{columns}
+        \column{0.55\textwidth}
+        \begin{lstlisting}
+# Tải dữ liệu (CSV dùng ; và , decimal)
+df_raw = pd.read_csv('AirQualityUCI.csv', 
+    sep=';', decimal=',', na_values=-200)
+df_raw = df_raw.dropna(how='all')
+
+# Kết hợp Date + Time
+df_raw['Datetime'] = pd.to_datetime(
+    df_raw['Date'] + ' ' + 
+    df_raw['Time'].str.replace('.', ':'),
+    format='%d/%m/%Y %H:%M:%S')
+
+# Chọn biến và resample theo ngày
+cols = ['CO(GT)', 'C6H6(GT)', 'NO2(GT)', 'T']
+df = df_raw[['Datetime']+cols].set_index('Datetime')
+df = df.resample('D').mean().dropna()
+        \end{lstlisting}
+        
+        \column{0.4\textwidth}
+        \begin{block}{\textbf{Kết quả}}
+            \begin{itemize}
+                \item Kích thước: \red{341 ngày}
+                \item Phạm vi: 10/03/2004 $\rightarrow$ 04/04/2005
+                \item 4 biến: CO, C6H6, NO2, Nhiệt độ
+            \end{itemize}
+        \end{block}
+    \end{columns}
+\end{frame}
+
+% ============================================================
+\section{Chia tập Train-Test}
+% ============================================================
+
+\begin{frame}{Chia tập Train-Test}
+    \begin{block}{Tỷ lệ: \red{80\% Train -- 20\% Test}}
+    \end{block}
+    
+    \vspace{0.5cm}
+    \begin{center}
+        \begin{tabular}{|c|c|c|}
+            \hline
+            \textbf{Tập} & \textbf{Số ngày} & \textbf{Thời gian} \\ \hline
+            Train & \red{272} & 10/03/2004 $\rightarrow$ 23/01/2005 \\ \hline
+            Test & \red{69} & 24/01/2005 $\rightarrow$ 04/04/2005 \\ \hline
+            Tổng & 341 & 10/03/2004 $\rightarrow$ 04/04/2005 \\ \hline
+        \end{tabular}
+    \end{center}
+    
+    \vspace{0.5cm}
+    \begin{lstlisting}
+split_ratio = 0.8
+split_idx = int(len(df) * split_ratio)
+train = df.iloc[:split_idx]
+test  = df.iloc[split_idx:]
+    \end{lstlisting}
+\end{frame}
+
+% ============================================================
+\section{Kiểm định tính dừng (ADF)}
+% ============================================================
+
+\begin{frame}{Kiểm định ADF}
+    \begin{block}{Augmented Dickey-Fuller Test}
+        $H_0$: Chuỗi có đơn vị gốc (không dừng) \\
+        Nếu p-value $< 0.05$: Bác bỏ $H_0$ $\rightarrow$ \green{Chuỗi dừng}
+    \end{block}
+    
+    \vspace{0.5cm}
+    \begin{center}
+        \begin{tabular}{|l|r|c|}
+            \hline
+            \textbf{Biến} & \textbf{p-value} & \textbf{Kết luận} \\ \hline
+            CO(GT) & 0.0112 & \green{Dừng} \\ \hline
+            C6H6(GT) & 0.0007 & \green{Dừng} \\ \hline
+            NO2(GT) & 0.3339 & \red{Không dừng} \\ \hline
+            T (Nhiệt độ) & 0.9046 & \red{Không dừng} \\ \hline
+        \end{tabular}
+    \end{center}
+    
+    \vspace{0.3cm}
+    $\Rightarrow$ NO2 và Nhiệt độ cần sai phân ($d \geq 1$)
+\end{frame}
+
+% ============================================================
+\section{Mô hình ARIMA}
+% ============================================================
+
+\begin{frame}{Mô hình ARIMA}
+    \begin{block}{ARIMA(p, d, q)}
+        \begin{itemize}
+            \item \highlight{p}: Bậc Tự hồi quy (AR)
+            \item \highlight{d}: Bậc sai phân (Integration)
+            \item \highlight{q}: Bậc Trung bình trượt (MA)
+        \end{itemize}
+    \end{block}
+    
+    \vspace{0.4cm}
+    \begin{alertblock}{Đặc điểm}
+        \begin{itemize}
+            \item Mô hình \highlight{đơn biến} -- mỗi chuỗi được mô hình hóa \highlight{độc lập}
+            \item Không nắm bắt tương quan giữa các biến
+            \item Grid search trên (p, d, q) để tối thiểu AIC
+        \end{itemize}
+    \end{alertblock}
+\end{frame}
+
+\begin{frame}{Kết quả ARIMA}
+    \begin{center}
+        \begin{tabular}{|l|c|r|}
+            \hline
+            \textbf{Biến} & \textbf{(p, d, q)} & \textbf{AIC} \\ \hline
+            CO(GT) & (3, 1, 3) & 619.14 \\ \hline
+            C6H6(GT) & (0, 1, 2) & 1532.69 \\ \hline
+            NO2(GT) & (2, 1, 3) & 2419.92 \\ \hline
+            T & (0, 1, 2) & 1258.95 \\ \hline
+        \end{tabular}
+    \end{center}
+    
+    \vspace{0.4cm}
+    \begin{lstlisting}
+# Grid search cho mỗi biến
+for p in [0,1,2,3]:
+    for d in [0,1]:
+        for q in [0,1,2,3]:
+            fitted = ARIMA(train[col], order=(p,d,q)).fit()
+            # Chọn AIC nhỏ nhất
+    \end{lstlisting}
+\end{frame}
+
+% ============================================================
+\section{Mô hình VAR}
+% ============================================================
+
+\begin{frame}{Mô hình VAR}
+    \begin{block}{VAR(k) -- Vector Autoregression}
+        \begin{itemize}
+            \item Mô hình \highlight{đa biến} -- tất cả biến được mô hình hóa \highlight{cùng lúc}
+            \item Nắm bắt \highlight{tương quan chéo} giữa các biến
+            \item Mỗi biến phụ thuộc vào giá trị quá khứ của \highlight{tất cả} biến
+        \end{itemize}
+    \end{block}
+    
+    \vspace{0.3cm}
+    \begin{equation*}
+        \mathbf{Y}_t = \mathbf{c} + \mathbf{A}_1 \mathbf{Y}_{t-1} + \cdots + \mathbf{A}_k \mathbf{Y}_{t-k} + \boldsymbol{\varepsilon}_t
+    \end{equation*}
+    với $\mathbf{Y}_t = [CO, C6H6, NO_2, T]^T$
+\end{frame}
+
+\begin{frame}{Chọn số bậc trễ tối ưu}
+    \begin{center}
+        \begin{tabular}{|r|r|}
+            \hline
+            \textbf{Bậc (lag)} & \textbf{AIC} \\ \hline
+            \red{1} & \red{7.18} \\ \hline
+            2 & 7.26 \\ \hline
+            3 & 7.23 \\ \hline
+            4 & 7.27 \\ \hline
+            5 & 7.34 \\ \hline
+            ... & ... \\ \hline
+            15 & 7.77 \\ \hline
+        \end{tabular}
+    \end{center}
+    
+    \vspace{0.4cm}
+    \begin{block}{Kết luận}
+        Số bậc trễ tối ưu: \highlight{k = 1} (AIC = 7.18)
+    \end{block}
+\end{frame}
+
+% ============================================================
+\section{So sánh kết quả}
+% ============================================================
+
+\begin{frame}{So sánh ARIMA vs VAR}
+    \begin{center}
+        \begin{tabular}{|l|r|r|c|}
+            \hline
+            \textbf{Chỉ số} & \textbf{ARIMA} & \textbf{VAR} & \textbf{Tốt hơn} \\ \hline
+            MSE & 428.93 & 403.04 & VAR \\ \hline
+            RMSE & 12.97 & 12.91 & VAR \\ \hline
+            MAE & 10.78 & 10.77 & VAR \\ \hline
+            MAPE & 55.53\% & 66.69\% & ARIMA \\ \hline
+        \end{tabular}
+    \end{center}
+    
+    \vspace{0.4cm}
+    \begin{alertblock}{Kết luận}
+        \begin{itemize}
+            \item ARIMA thắng: \red{1/4} chỉ số
+            \item VAR thắng: \red{3/4} chỉ số
+            \item \highlight{VAR hoạt động tốt hơn tổng thể}
+        \end{itemize}
+    \end{alertblock}
+\end{frame}
+
+\begin{frame}{Kết quả theo từng biến}
+    \begin{columns}
+        \column{0.5\textwidth}
+        \begin{block}{CO(GT), C6H6(GT), T}
+            \begin{itemize}
+                \item ARIMA tốt hơn trên tất cả 4 chỉ số
+                \item Các chuỗi có động lực riêng mạnh
+            \end{itemize}
+        \end{block}
+        
+        \column{0.5\textwidth}
+        \begin{alertblock}{NO2(GT)}
+            \begin{itemize}
+                \item VAR tốt hơn trên tất cả 4 chỉ số
+                \item Có tương quan với các biến khác
+            \end{itemize}
+        \end{alertblock}
+    \end{columns}
+    
+    \vspace{0.4cm}
+    \begin{center}
+        \begin{tabular}{|l|r|r|r|r|}
+            \hline
+            \textbf{Biến} & \textbf{MSE} & \textbf{RMSE} & \textbf{MAE} & \textbf{MAPE} \\ \hline
+            CO(GT) & ARIMA & ARIMA & ARIMA & ARIMA \\ \hline
+            C6H6(GT) & ARIMA & ARIMA & ARIMA & ARIMA \\ \hline
+            NO2(GT) & VAR & VAR & VAR & VAR \\ \hline
+            T & ARIMA & ARIMA & ARIMA & ARIMA \\ \hline
+        \end{tabular}
+    \end{center}
+\end{frame}
+
+% ============================================================
+\section{Những điểm chính}
+% ============================================================
+
+\begin{frame}{Tổng kết}
+    \begin{center}
+        \begin{tabular}{|l|c|c|}
+            \hline
+            & \textbf{ARIMA} & \textbf{VAR} \\ \hline
+            \textbf{Kiểu mô hình} & Đơn biến & Đa biến \\ \hline
+            \textbf{Tương quan chéo} & \red{Không} & \green{Có} \\ \hline
+            \textbf{Tham số} & (p,d,q) cho mỗi chuỗi & Bậc trễ chung \\ \hline
+            \textbf{Phù hợp với} & Chuỗi độc lập & Chuỗi có tương quan \\ \hline
+        \end{tabular}
+    \end{center}
+    
+    \vspace{0.5cm}
+    \begin{itemize}
+        \item \highlight{ARIMA}: Mỗi biến mô hình độc lập; tốt khi chuỗi có động lực riêng mạnh
+        \item \highlight{VAR}: Nắm bắt tương quan (CO và NO$_2$ đều từ khí thải giao thông)
+    \end{itemize}
+\end{frame}
+
+% --- Thank you slide ---
+\begin{frame}
+    \begin{center}
+        \vspace{1cm}
+        {\Huge \color{hkustred} Cảm ơn cô đã lắng nghe!}
+        
+        \vspace{1cm}
+        \Large Vũ Công Tuấn Dương -- B22DCKH024
+        
+        \normalsize Khoa CNTT1 -- PTIT
+    \end{center}
+\end{frame}
+
+\end{document}
